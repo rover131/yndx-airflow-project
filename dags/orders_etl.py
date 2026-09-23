@@ -6,17 +6,20 @@ from airflow.operators.python import PythonOperator
 
 
 def extract_orders(ti):
+    # Получаем очередную выгрузку заказов.
     orders = [
         {"order_id": 101, "amount": 1250, "status": "paid"},
         {"order_id": 102, "amount": 980, "status": "cancelled"},
         {"order_id": 103, "amount": 740, "status": "paid"},
         {"order_id": 104, "amount": 1600, "status": "paid"},
     ]
+    # Сохраняем идентификатор загрузки и передаём заказы следующей задаче.
     ti.xcom_push(key="batch_id", value="daily_orders")
     return orders
 
 
 def transform_orders(ti):
+    # Забираем заказы из XCom и оставляем только оплаченные.
     orders = ti.xcom_pull(task_ids="extract_orders")
     paid_orders = [order for order in orders if order["status"] == "paid"]
     return {
@@ -26,13 +29,16 @@ def transform_orders(ti):
 
 
 def load_summary(ti):
+    # Получаем рассчитанные показатели и идентификатор загрузки.
     summary = ti.xcom_pull(task_ids="transform_orders")
     batch_id = ti.xcom_pull(task_ids="extract_orders", key="batch_id")
     result = {"batch_id": batch_id, **summary}
+    # Сохраняем итог и выводим его в лог задачи.
     ti.xcom_push(key="etl_result", value=result)
     print(result)
 
 
+# Повторяем задачу после временного сбоя не более двух раз.
 default_args = {
     "owner": "student",
     "retries": 2,
@@ -40,6 +46,7 @@ default_args = {
 }
 
 
+# Создаём DAG и задаём ежедневное расписание.
 dag = DAG(
     dag_id="orders_etl",
     description="Ежедневная обработка заказов",
@@ -50,6 +57,7 @@ dag = DAG(
     tags=["etl", "orders"],
 )
 
+# Превращаем функции Python в задачи Airflow.
 extract_task = PythonOperator(
     task_id="extract_orders",
     python_callable=extract_orders,
@@ -68,4 +76,5 @@ load_task = PythonOperator(
     dag=dag,
 )
 
+# Указываем порядок выполнения задач.
 extract_task >> transform_task >> load_task
