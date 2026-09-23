@@ -8,7 +8,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 
 
-def extract_orders(ti):
+def extract_orders(ti, ds=None):
     """Возвращает небольшую учебную выгрузку заказов через XCom."""
     orders = [
         {"order_id": 101, "amount": 1250, "status": "paid"},
@@ -19,7 +19,7 @@ def extract_orders(ti):
     ]
 
     # Именованный XCom пригодится следующей задаче вместе с return_value.
-    ti.xcom_push(key="batch_id", value="demo_orders_2026_09")
+    ti.xcom_push(key="batch_id", value=f"orders_{ds or 'manual'}")
     return orders
 
 
