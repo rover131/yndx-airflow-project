@@ -1,6 +1,3 @@
-"""Учебный ETL-DAG: загрузка заказов, расчёт метрик и сохранение результата."""
-
-import json
 from datetime import timedelta
 
 import pendulum
@@ -8,49 +5,32 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 
 
-def extract_orders(ti, ds=None):
-    """Возвращает небольшую учебную выгрузку заказов через XCom."""
+def extract_orders(ti):
     orders = [
         {"order_id": 101, "amount": 1250, "status": "paid"},
         {"order_id": 102, "amount": 980, "status": "cancelled"},
         {"order_id": 103, "amount": 740, "status": "paid"},
-        {"order_id": 104, "amount": -50, "status": "paid"},
-        {"order_id": 105, "amount": 1600, "status": "paid"},
+        {"order_id": 104, "amount": 1600, "status": "paid"},
     ]
-
-    # Именованный XCom пригодится следующей задаче вместе с return_value.
-    ti.xcom_push(key="batch_id", value=f"orders_{ds or 'manual'}")
+    ti.xcom_push(key="batch_id", value="orders_demo")
     return orders
 
 
 def transform_orders(ti):
-    """Оставляет корректные оплаченные заказы и считает дневные метрики."""
     orders = ti.xcom_pull(task_ids="extract_orders")
-    paid_orders = [
-        order
-        for order in orders
-        if order["status"] == "paid" and order["amount"] > 0
-    ]
-
-    total_revenue = sum(order["amount"] for order in paid_orders)
+    paid_orders = [order for order in orders if order["status"] == "paid"]
     return {
         "paid_orders_count": len(paid_orders),
-        "total_revenue": total_revenue,
-        "average_order_value": (
-            round(total_revenue / len(paid_orders), 2) if paid_orders else 0.0
-        ),
+        "total_revenue": sum(order["amount"] for order in paid_orders),
     }
 
 
 def load_summary(ti):
-    """Сохраняет итог в XCom и выводит его в лог задачи."""
     summary = ti.xcom_pull(task_ids="transform_orders")
     batch_id = ti.xcom_pull(task_ids="extract_orders", key="batch_id")
     result = {"batch_id": batch_id, **summary}
-
-    # В следующем гайде эту операцию можно заменить записью результата в S3.
     ti.xcom_push(key="etl_result", value=result)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(result)
 
 
 default_args = {
