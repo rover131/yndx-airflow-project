@@ -12,7 +12,7 @@ def extract_orders(ti):
         {"order_id": 103, "amount": 740, "status": "paid"},
         {"order_id": 104, "amount": 1600, "status": "paid"},
     ]
-    ti.xcom_push(key="batch_id", value="orders_demo")
+    ti.xcom_push(key="batch_id", value="daily_orders")
     return orders
 
 
@@ -42,12 +42,12 @@ default_args = {
 
 dag = DAG(
     dag_id="orders_etl",
-    description="Учебный ETL-процесс для ежедневной обработки заказов",
+    description="Ежедневная обработка заказов",
     default_args=default_args,
     start_date=pendulum.datetime(2026, 9, 1, tz="UTC"),
     schedule_interval="@daily",
     catchup=False,
-    tags=["etl", "guide"],
+    tags=["etl", "orders"],
 )
 
 extract_task = PythonOperator(
