@@ -1,12 +1,21 @@
 from datetime import timedelta
 from io import StringIO
 
+import boto3
 import pandas as pd
 import pendulum
 from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+
+
+def get_s3_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=Variable.get("s3_endpoint"),
+        aws_access_key_id=Variable.get("s3_access_key"),
+        aws_secret_access_key=Variable.get("s3_secret_key"),
+    )
 
 
 def extract_orders(raw_orders_key):
@@ -17,16 +26,15 @@ def extract_orders(raw_orders_key):
         {"order_id": 104, "amount": 1600, "status": "paid"},
     ]
 
-    s3_hook = S3Hook(aws_conn_id="yandex_s3")
+    s3_client = get_s3_client()
     bucket_name = Variable.get("s3_bucket")
 
     # Сохраняем исходную выгрузку в S3.
     orders_csv = pd.DataFrame(orders).to_csv(index=False)
-    s3_hook.load_string(
-        string_data=orders_csv,
-        key=raw_orders_key,
-        bucket_name=bucket_name,
-        replace=True,
+    s3_client.put_object(
+        Bucket=bucket_name,
+        Key=raw_orders_key,
+        Body=orders_csv.encode("utf-8"),
     )
     return raw_orders_key  # В XCom попадёт только ключ
 
@@ -34,23 +42,20 @@ def extract_orders(raw_orders_key):
 def transform_orders(processed_orders_key, ti):
     raw_orders_key = ti.xcom_pull(task_ids="extract_orders")
 
-    s3_hook = S3Hook(aws_conn_id="yandex_s3")
+    s3_client = get_s3_client()
     bucket_name = Variable.get("s3_bucket")
 
     # Читаем исходные данные по ключу из XCom.
-    orders_csv = s3_hook.read_key(
-        key=raw_orders_key,
-        bucket_name=bucket_name,
-    )
+    response = s3_client.get_object(Bucket=bucket_name, Key=raw_orders_key)
+    orders_csv = response["Body"].read().decode("utf-8")
     orders = pd.read_csv(StringIO(orders_csv))
     paid_orders = orders.loc[orders["status"] == "paid"]
 
     # Сохраняем обработанный датасет отдельно.
-    s3_hook.load_string(
-        string_data=paid_orders.to_csv(index=False),
-        key=processed_orders_key,
-        bucket_name=bucket_name,
-        replace=True,
+    s3_client.put_object(
+        Bucket=bucket_name,
+        Key=processed_orders_key,
+        Body=paid_orders.to_csv(index=False).encode("utf-8"),
     )
     return processed_orders_key  # Передаём ключ следующей задаче
 
@@ -58,14 +63,15 @@ def transform_orders(processed_orders_key, ti):
 def load_summary(ti):
     processed_orders_key = ti.xcom_pull(task_ids="transform_orders")
 
-    s3_hook = S3Hook(aws_conn_id="yandex_s3")
+    s3_client = get_s3_client()
     bucket_name = Variable.get("s3_bucket")
 
     # Загружаем оплаченные заказы и считаем показатели.
-    paid_orders_csv = s3_hook.read_key(
-        key=processed_orders_key,
-        bucket_name=bucket_name,
+    response = s3_client.get_object(
+        Bucket=bucket_name,
+        Key=processed_orders_key,
     )
+    paid_orders_csv = response["Body"].read().decode("utf-8")
     paid_orders = pd.read_csv(StringIO(paid_orders_csv))
     summary = {
         "paid_orders_count": len(paid_orders),
