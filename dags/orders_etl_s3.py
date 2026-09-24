@@ -9,55 +9,71 @@ from airflow.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 
-RAW_ORDERS_KEY = "orders/raw/orders.csv"
-
-
-def prepare_paid_orders(output_key):
-    # Подключаемся к S3 через Airflow Connection.
-    s3_hook = S3Hook(aws_conn_id="yandex_s3")
-    source_bucket = Variable.get("source_s3_bucket")
-    personal_bucket = Variable.get("personal_s3_bucket")
-
-    # Читаем исходную выгрузку и оставляем оплаченные заказы.
-    raw_orders_csv = s3_hook.read_key(
-        key=RAW_ORDERS_KEY,
-        bucket_name=source_bucket,
-    )
-    orders = pd.read_csv(StringIO(raw_orders_csv))
-    paid_orders = orders.loc[
-        orders["status"] == "paid",
-        ["order_id", "amount", "status"],
+def extract_orders(raw_orders_key):
+    orders = [
+        {"order_id": 101, "amount": 1250, "status": "paid"},
+        {"order_id": 102, "amount": 980, "status": "cancelled"},
+        {"order_id": 103, "amount": 740, "status": "paid"},
+        {"order_id": 104, "amount": 1600, "status": "paid"},
     ]
 
-    # Сохраняем крупный результат в S3, а не в XCom.
+    s3_hook = S3Hook(aws_conn_id="yandex_s3")
+    bucket_name = Variable.get("s3_bucket")
+
+    # Сохраняем исходную выгрузку в S3.
+    orders_csv = pd.DataFrame(orders).to_csv(index=False)
     s3_hook.load_string(
-        string_data=paid_orders.to_csv(index=False),
-        key=output_key,
-        bucket_name=personal_bucket,
+        string_data=orders_csv,
+        key=raw_orders_key,
+        bucket_name=bucket_name,
         replace=True,
     )
-    return output_key
+    return raw_orders_key  # В XCom попадёт только ключ
 
 
-def calculate_order_summary(ti):
-    # Получаем из XCom только ключ объекта в S3.
-    processed_orders_key = ti.xcom_pull(task_ids="prepare_paid_orders")
+def transform_orders(processed_orders_key, ti):
+    raw_orders_key = ti.xcom_pull(task_ids="extract_orders")
 
     s3_hook = S3Hook(aws_conn_id="yandex_s3")
-    personal_bucket = Variable.get("personal_s3_bucket")
+    bucket_name = Variable.get("s3_bucket")
 
-    # Загружаем данные по ключу и рассчитываем итоговые показатели.
+    # Читаем исходные данные по ключу из XCom.
+    orders_csv = s3_hook.read_key(
+        key=raw_orders_key,
+        bucket_name=bucket_name,
+    )
+    orders = pd.read_csv(StringIO(orders_csv))
+    paid_orders = orders.loc[orders["status"] == "paid"]
+
+    # Сохраняем обработанный датасет отдельно.
+    s3_hook.load_string(
+        string_data=paid_orders.to_csv(index=False),
+        key=processed_orders_key,
+        bucket_name=bucket_name,
+        replace=True,
+    )
+    return processed_orders_key  # Передаём ключ следующей задаче
+
+
+def load_summary(ti):
+    processed_orders_key = ti.xcom_pull(task_ids="transform_orders")
+
+    s3_hook = S3Hook(aws_conn_id="yandex_s3")
+    bucket_name = Variable.get("s3_bucket")
+
+    # Загружаем оплаченные заказы и считаем показатели.
     paid_orders_csv = s3_hook.read_key(
         key=processed_orders_key,
-        bucket_name=personal_bucket,
+        bucket_name=bucket_name,
     )
     paid_orders = pd.read_csv(StringIO(paid_orders_csv))
     summary = {
         "paid_orders_count": len(paid_orders),
         "total_revenue": float(paid_orders["amount"].sum()),
     }
+
+    ti.xcom_push(key="etl_result", value=summary)
     print(summary)
-    return summary
 
 
 default_args = {
@@ -77,19 +93,30 @@ dag = DAG(
     tags=["etl", "orders", "s3"],
 )
 
-prepare_task = PythonOperator(
-    task_id="prepare_paid_orders",
-    python_callable=prepare_paid_orders,
+extract_task = PythonOperator(
+    task_id="extract_orders",
+    python_callable=extract_orders,
     op_kwargs={
-        "output_key": "orders/processed/paid_orders_{{ ds_nodash }}.csv",
+        "raw_orders_key": "orders/raw/orders_{{ ds_nodash }}.csv",
     },
     dag=dag,
 )
 
-summary_task = PythonOperator(
-    task_id="calculate_order_summary",
-    python_callable=calculate_order_summary,
+transform_task = PythonOperator(
+    task_id="transform_orders",
+    python_callable=transform_orders,
+    op_kwargs={
+        "processed_orders_key": (
+            "orders/processed/paid_orders_{{ ds_nodash }}.csv"
+        ),
+    },
     dag=dag,
 )
 
-prepare_task >> summary_task
+load_task = PythonOperator(
+    task_id="load_summary",
+    python_callable=load_summary,
+    dag=dag,
+)
+
+extract_task >> transform_task >> load_task
