@@ -1,6 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
-import pendulum
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
@@ -13,7 +12,7 @@ def extract_orders(ti):
         {"order_id": 103, "amount": 740, "status": "paid"},
         {"order_id": 104, "amount": 1600, "status": "paid"},
     ]
-    # Сохраняем идентификатор загрузки и передаём заказы следующей задаче.
+    # Сохраняем метку загрузки под отдельным ключом.
     ti.xcom_push(key="batch_id", value="daily_orders")
     return orders
 
@@ -51,7 +50,7 @@ dag = DAG(
     dag_id="orders_etl",
     description="Ежедневная обработка заказов",
     default_args=default_args,
-    start_date=pendulum.datetime(2026, 9, 1, tz="UTC"),
+    start_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
     schedule_interval="@daily",
     catchup=False,
     tags=["etl", "orders"],
