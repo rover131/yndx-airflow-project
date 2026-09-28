@@ -1,9 +1,8 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from io import StringIO
 
 import boto3
 import pandas as pd
-import pendulum
 from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
@@ -93,7 +92,7 @@ dag = DAG(
     dag_id="orders_etl_s3",
     description="Ежедневная обработка заказов с хранением данных в S3",
     default_args=default_args,
-    start_date=pendulum.datetime(2026, 9, 1, tz="UTC"),
+    start_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
     schedule_interval="@daily",
     catchup=False,
     tags=["etl", "orders", "s3"],
