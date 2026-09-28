@@ -9,6 +9,7 @@ from airflow.operators.python import PythonOperator
 
 
 def get_s3_client():
+    # Получаем параметры подключения из Airflow Variables.
     return boto3.client(
         "s3",
         endpoint_url=Variable.get("s3_endpoint"),
@@ -18,6 +19,7 @@ def get_s3_client():
 
 
 def extract_orders(raw_orders_key):
+    # Подготавливаем исходные данные о заказах.
     orders = [
         {"order_id": 101, "amount": 1250, "status": "paid"},
         {"order_id": 102, "amount": 980, "status": "cancelled"},
@@ -39,6 +41,7 @@ def extract_orders(raw_orders_key):
 
 
 def transform_orders(processed_orders_key, ti):
+    # Получаем ключ исходного объекта из XCom.
     raw_orders_key = ti.xcom_pull(task_ids="extract_orders")
 
     s3_client = get_s3_client()
@@ -48,6 +51,7 @@ def transform_orders(processed_orders_key, ti):
     response = s3_client.get_object(Bucket=bucket_name, Key=raw_orders_key)
     orders_csv = response["Body"].read().decode("utf-8")
     orders = pd.read_csv(StringIO(orders_csv))
+    # Оставляем только оплаченные заказы.
     paid_orders = orders.loc[orders["status"] == "paid"]
 
     # Сохраняем обработанный датасет отдельно.
@@ -60,6 +64,7 @@ def transform_orders(processed_orders_key, ti):
 
 
 def load_summary(ti):
+    # Получаем ключ обработанного объекта из XCom.
     processed_orders_key = ti.xcom_pull(task_ids="transform_orders")
 
     s3_client = get_s3_client()
@@ -77,6 +82,7 @@ def load_summary(ti):
         "total_revenue": float(paid_orders["amount"].sum()),
     }
 
+    # Сохраняем итоговые показатели в XCom.
     ti.xcom_push(key="etl_result", value=summary)
     print(summary)
 
@@ -102,6 +108,7 @@ extract_task = PythonOperator(
     task_id="extract_orders",
     python_callable=extract_orders,
     op_kwargs={
+        # Добавляем дату запуска в ключ исходного объекта.
         "raw_orders_key": "orders/raw/orders_{{ ds_nodash }}.csv",
     },
     dag=dag,
@@ -111,6 +118,7 @@ transform_task = PythonOperator(
     task_id="transform_orders",
     python_callable=transform_orders,
     op_kwargs={
+        # Добавляем дату запуска в ключ обработанного объекта.
         "processed_orders_key": (
             "orders/processed/paid_orders_{{ ds_nodash }}.csv"
         ),
@@ -124,4 +132,5 @@ load_task = PythonOperator(
     dag=dag,
 )
 
+# Задаём последовательность выполнения задач.
 extract_task >> transform_task >> load_task
