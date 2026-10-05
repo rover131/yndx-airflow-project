@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+# Функции обработки лежат отдельно от описания DAG.
 from bike_rides_processing import (
     clean_rides,
     load_rides,
@@ -11,6 +12,7 @@ from bike_rides_processing import (
 )
 
 
+# Создаём DAG для ручного запуска.
 dag = DAG(
     dag_id="bike_rides_etl",
     description="Подготовка данных о поездках на велосипедах",
@@ -19,6 +21,7 @@ dag = DAG(
     catchup=False,
 )
 
+# Каждая задача вызывает одну функцию из файла обработки.
 load_task = PythonOperator(
     task_id="load_rides",
     python_callable=load_rides,
@@ -31,6 +34,7 @@ transform_task = PythonOperator(
     dag=dag,
 )
 
+# Новый оператор вызывает обёртку, которая передаёт данные в clean_data.
 clean_task = PythonOperator(
     task_id="clean_rides",
     python_callable=clean_rides,
