@@ -1,3 +1,6 @@
+import pandas as pd
+
+
 def load_rides():
     # Возвращаем четыре записи; PythonOperator передаст список через XCom.
     return [
@@ -24,13 +27,41 @@ def transform_rides(ti):
     return transformed
 
 
-def save_summary(ti):
-    # Получаем поездки после преобразования названий станций.
+def clean_data(df: pd.DataFrame, required_columns, duplicate_columns) -> pd.DataFrame:
+    # Копируем таблицу, чтобы не менять входной DataFrame.
+    cleaned = df.copy()
+    # Удаляем строки с пропуском хотя бы в одном обязательном столбце.
+    cleaned = cleaned.dropna(subset=required_columns)
+    # Для повторного номера поездки оставляем первую запись.
+    cleaned = cleaned.drop_duplicates(subset=duplicate_columns)
+    # Перенумеровываем строки после удаления.
+    return cleaned.reset_index(drop=True)
+
+
+def clean_rides(ti):
+    # Получаем короткий список записей из предыдущей задачи.
     rides = ti.xcom_pull(task_ids="transform_rides")
-    # Пока считаем все записи, подставляя ноль вместо пропуска.
+    # Превращаем список словарей в таблицу для функции clean_data.
+    data = pd.DataFrame(rides)
+    cleaned = clean_data(
+        data,
+        required_columns=["ride_id", "duration_min"],
+        duplicate_columns=["ride_id"],
+    )
+
+    print(f"Поездок до очистки: {len(data)}")
+    print(f"Поездок после очистки: {len(cleaned)}")
+    # Возвращаем небольшой список, который Airflow сможет передать дальше.
+    return cleaned.to_dict(orient="records")
+
+
+def save_summary(ti):
+    # Получаем только те поездки, которые прошли очистку.
+    rides = ti.xcom_pull(task_ids="clean_rides")
+    # Считаем поездки и их общую длительность.
     summary = {
         "rides_count": len(rides),
-        "total_minutes": sum(ride["duration_min"] or 0 for ride in rides),
+        "total_minutes": int(sum(ride["duration_min"] for ride in rides)),
     }
     print(summary)
     # Сводка также сохранится в XCom под ключом return_value.
