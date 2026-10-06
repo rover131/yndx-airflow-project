@@ -76,11 +76,12 @@ def train_and_evaluate(data, config):
 
 
 def run_from_s3():
-    # Airflow хранит доступ к S3 отдельно от кода DAG.
     import boto3
     from airflow.models import Variable
 
+    # Читаем путь к CSV и параметры обработки из конфигурации.
     config = load_config()
+    # Получаем настройки доступа из Airflow Variables.
     s3 = boto3.client(
         "s3",
         endpoint_url=Variable.get("s3_endpoint"),
@@ -88,10 +89,12 @@ def run_from_s3():
         aws_secret_access_key=Variable.get("s3_secret_key"),
         region_name="ru-central1",
     )
+    # Находим объект по имени бакета и ключу из конфигурации.
     response = s3.get_object(
         Bucket=Variable.get("s3_bucket"),
         Key=config["data_key"],
     )
+    # Превращаем содержимое CSV в таблицу pandas.
     csv_text = response["Body"].read().decode("utf-8")
     data = pd.read_csv(StringIO(csv_text))
     result = train_and_evaluate(data, config)
