@@ -14,9 +14,10 @@ from bike_rides_processing import clean_data
 
 
 def load_config():
-    # Конфигурация лежит рядом с кодом обработки.
+    # Находим JSON-файл рядом с кодом обработки.
     config_path = Path(__file__).with_name("bike_rides_ml_config.json")
     with config_path.open(encoding="utf-8") as file:
+        # Получаем параметры в виде словаря.
         return json.load(file)
 
 
@@ -27,9 +28,11 @@ def train_and_evaluate(data, config):
         required_columns=config["required_features"] + [config["target"]],
         duplicate_columns=config["duplicate_columns"],
     )
+    # Отделяем признаки от длительности поездки.
     X = cleaned[config["required_features"]]
     y = cleaned[config["target"]]
 
+    # Оставляем часть поездок для проверки модели.
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
@@ -37,7 +40,7 @@ def train_and_evaluate(data, config):
         random_state=config["random_state"],
     )
 
-    # Та же функция становится первым шагом sklearn Pipeline.
+    # Оборачиваем готовую функцию в шаг sklearn Pipeline.
     clean_step = FunctionTransformer(
         clean_data,
         kw_args={
@@ -46,6 +49,7 @@ def train_and_evaluate(data, config):
         },
         validate=False,
     )
+    # Кодируем станции; номер поездки в модель не передаём.
     columns_step = ColumnTransformer(
         transformers=[
             (
@@ -55,6 +59,7 @@ def train_and_evaluate(data, config):
             ),
         ],
     )
+    # Выполняем очистку, кодирование и обучение по порядку.
     model = Pipeline(
         steps=[
             ("clean", clean_step),
@@ -66,12 +71,14 @@ def train_and_evaluate(data, config):
     # Обучаем всю цепочку и измеряем ошибку на тестовой выборке.
     model.fit(X_train, y_train)
     predictions = model.predict(X_test)
+    mae = mean_absolute_error(y_test, predictions)
+    # Возвращаем небольшую сводку для журнала и XCom.
     return {
         "rows_before_cleaning": len(data),
         "rows_after_cleaning": len(cleaned),
         "train_rows": len(X_train),
         "test_rows": len(X_test),
-        "mae_minutes": round(float(mean_absolute_error(y_test, predictions)), 2),
+        "mae_minutes": round(float(mae), 2),
     }
 
 
@@ -97,6 +104,7 @@ def run_from_s3():
     # Превращаем содержимое CSV в таблицу pandas.
     csv_text = response["Body"].read().decode("utf-8")
     data = pd.read_csv(StringIO(csv_text))
+    # Запускаем обучение и возвращаем его результат.
     result = train_and_evaluate(data, config)
     print(result)
     return result

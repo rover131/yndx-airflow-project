@@ -11,6 +11,7 @@ def train_model():
     return run_from_s3()
 
 
+# Создаём DAG для ручного запуска обучения.
 dag = DAG(
     dag_id="bike_rides_ml_pipeline",
     description="Очистка поездок и обучение модели длительности",
@@ -20,6 +21,7 @@ dag = DAG(
     tags=["bike_rides", "ml"],
 )
 
+# Задача вызывает функцию загрузки и обучения.
 train_task = PythonOperator(
     task_id="train_model",
     python_callable=train_model,
