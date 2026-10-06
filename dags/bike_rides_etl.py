@@ -5,7 +5,6 @@ from airflow.operators.python import PythonOperator
 
 # Функции обработки лежат отдельно от описания DAG.
 from bike_rides_processing import (
-    clean_rides,
     load_rides,
     save_summary,
     transform_rides,
@@ -34,18 +33,11 @@ transform_task = PythonOperator(
     dag=dag,
 )
 
-# Новый оператор вызывает обёртку, которая передаёт данные в clean_data.
-clean_task = PythonOperator(
-    task_id="clean_rides",
-    python_callable=clean_rides,
-    dag=dag,
-)
-
 save_task = PythonOperator(
     task_id="save_summary",
     python_callable=save_summary,
     dag=dag,
 )
 
-# Очистка выполняется после преобразования и до расчёта сводки.
-load_task >> transform_task >> clean_task >> save_task
+# Сводка считается после преобразования названий станций.
+load_task >> transform_task >> save_task
