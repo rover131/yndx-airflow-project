@@ -1,0 +1,9 @@
+{
+  "data_key": "bike_rides/rides.csv",
+  "target": "duration_min",
+  "required_features": ["ride_id", "station"],
+  "duplicate_columns": ["ride_id"],
+  "categorical_columns": ["station"],
+  "test_size": 0.2,
+  "random_state": 42
+}
